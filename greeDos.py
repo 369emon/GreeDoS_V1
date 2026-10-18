@@ -97,6 +97,7 @@ class AttackSimulator:
         self.threads = threads
         self.duration = duration  # seconds
         self.running = False
+        self.completed = threading.Event()
         self.requests_sent = 0
         self.lock = threading.Lock()
 
@@ -114,13 +115,16 @@ class AttackSimulator:
        
         self.running = True
         thread_list = []
-        for i in range(self.threads):
-            t = threading.Thread(target=self.simulate_http_flood, name=f"FloodThread-{i+1}")
-            t.start()
-            thread_list.append(t)
-        for t in thread_list:
-            t.join()
-        self.running = False
+        try:
+            for i in range(self.threads):
+                t = threading.Thread(target=self.simulate_http_flood, name=f"FloodThread-{i+1}")
+                t.start()
+                thread_list.append(t)
+            for t in thread_list:
+                t.join()
+        finally:
+            self.running = False
+            self.completed.set()
 
     def stop(self):
         self.running = False
@@ -143,8 +147,9 @@ class ForensicAnalyzer:
 
 class ProtocolAnalyzer:
    
-    def __init__(self, analyzer: ForensicAnalyzer):
+    def __init__(self, analyzer: ForensicAnalyzer, stop_event: threading.Event):
         self.analyzer = analyzer
+        self.stop_event = stop_event
 
     def analyze_packet(self, packet):
         
@@ -153,8 +158,7 @@ class ProtocolAnalyzer:
 
     def start_sniffing(self):
        
-        while True:
-            time.sleep(random.uniform(0.1, 0.5))
+        while not self.stop_event.wait(random.uniform(0.1, 0.5)):
             dummy_packet = f"Packet-{random.randint(1,1000)}"
             self.analyzer.log_event("PACKET", f"Captured {dummy_packet}")
             self.analyze_packet(dummy_packet)
@@ -213,6 +217,8 @@ class Dashboard:
                 live.update(combined)
                 console.print(log_panel)
                 console.print(alert_panel)
+                if self.simulator.completed.is_set():
+                    break
                 await asyncio.sleep(2)
 
 
@@ -228,18 +234,25 @@ async def main(args):
     simulator = AttackSimulator(args.target, args.threads, args.duration)
     detector = AlertDetector(simulator, analyzer)
     dashboard = Dashboard(simulator, analyzer, detector)
-    protocol_analyzer = ProtocolAnalyzer(analyzer)
+    stop_event = threading.Event()
+    protocol_analyzer = ProtocolAnalyzer(analyzer, stop_event)
 
    
     sim_thread = threading.Thread(target=simulator.start, name="AttackSimulatorThread")
     sim_thread.start()
 
     
-    proto_thread = threading.Thread(target=protocol_analyzer.start_sniffing, name="ProtocolAnalyzerThread", daemon=True)
+    proto_thread = threading.Thread(target=protocol_analyzer.start_sniffing, name="ProtocolAnalyzerThread")
     proto_thread.start()
 
     
-    await dashboard.display()
+    try:
+        await dashboard.display()
+    finally:
+        simulator.stop()
+        stop_event.set()
+        sim_thread.join()
+        proto_thread.join()
 
 
 if __name__ == '__main__':
