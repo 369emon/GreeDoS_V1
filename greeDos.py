@@ -49,10 +49,63 @@ from datetime import datetime
 from collections import deque
 
 
-from rich.console import Console
-from rich.table import Table
-from rich.live import Live
-from rich.panel import Panel
+try:
+    # Import dynamically so static analyzers do not require the optional
+    # ``rich`` package to be installed just to load this module.
+    from importlib import import_module
+
+    Console = import_module("rich.console").Console
+    Table = import_module("rich.table").Table
+    Live = import_module("rich.live").Live
+    Panel = import_module("rich.panel").Panel
+except ImportError:
+    class Console:
+        def print(self, *objects, **kwargs):
+            print(*objects)
+
+        def log(self, *objects, **kwargs):
+            print(*objects)
+
+    class Table:
+        def __init__(self, title=None):
+            self.title = title
+            self.rows = []
+
+        def add_column(self, *args, **kwargs):
+            pass
+
+        def add_row(self, *values):
+            self.rows.append(values)
+
+        def __str__(self):
+            title = f"{self.title}\n" if self.title else ""
+            return title + "\n".join(" | ".join(row) for row in self.rows)
+
+    class Panel:
+        def __init__(self, content, title=None, **kwargs):
+            self.content = content
+            self.title = title
+
+        @classmethod
+        def fit(cls, content, title=None):
+            return cls(content, title)
+
+        def __str__(self):
+            title = f"{self.title}\n" if self.title else ""
+            return title + str(self.content)
+
+    class Live:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            return False
+
+        def update(self, *args, **kwargs):
+            pass
 
 
 console = Console()
